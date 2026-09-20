@@ -104,6 +104,13 @@ class ConverterTests(unittest.TestCase):
 
 
 class IPATests(unittest.TestCase):
+    def test_rejects_embedded_developer_source_paths(self):
+        m = module('ipa', 'Tools/validate_ipa.py')
+        header = struct.pack('<8I',0xfeedfacf,0x100000c,0,2,1,24,0,0)
+        data = header + struct.pack('<6I',0x32,24,2,0x100000,0x120000,0)
+        with self.assertRaises(ValueError):
+            m.inspect_macho(data+b'\0/Users/runner/work/project/source.c\0')
+
     def test_rejects_archive_traversal(self):
         m = module('ipa', 'Tools/validate_ipa.py')
         with tempfile.TemporaryDirectory() as d:

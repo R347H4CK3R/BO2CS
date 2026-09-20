@@ -14,6 +14,8 @@ import zipfile
 
 
 def inspect_macho(data):
+    if re.search(rb'(?:/Users/|/home/|/Volumes/|[A-Za-z]:\\Users\\)', data):
+        raise ValueError('embedded absolute developer-machine path')
     if len(data) < 32 or data[:4] != b'\xcf\xfa\xed\xfe':
         raise ValueError('expected thin little-endian ARM64 Mach-O (fat/x86 not accepted)')
     magic, cpu, subtype, filetype, count, size, flags, reserved = struct.unpack_from('<8I', data)

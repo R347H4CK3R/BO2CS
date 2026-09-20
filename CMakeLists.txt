@@ -2,9 +2,15 @@ cmake_minimum_required(VERSION 3.24)
 project(BO2CS LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    # Applies to the app and fetched dependencies, including SDL diagnostic strings.
+    add_compile_options("-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.")
+endif()
 option(BO2CS_IOS "Build native iOS application" OFF)
 include(FetchContent)
-FetchContent_Declare(json GIT_REPOSITORY https://github.com/nlohmann/json.git GIT_TAG 65ee68451d8eb2b5f3a30b410476ab83deb3289b)
+FetchContent_Declare(json
+    URL https://codeload.github.com/nlohmann/json/tar.gz/65ee68451d8eb2b5f3a30b410476ab83deb3289b
+    URL_HASH SHA256=13ef31d691947940a08909f8e0772f1d7d68e5da1678ee812a49c4bb0c996b2f)
 set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(json)
 add_library(GameCore Source/Game.cpp)
@@ -24,7 +30,9 @@ if(BO2CS_IOS)
     set(SDL_STATIC ON CACHE BOOL "" FORCE)
     set(SDL_TEST OFF CACHE BOOL "" FORCE)
     set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(SDL2 GIT_REPOSITORY https://github.com/libsdl-org/SDL.git GIT_TAG 5d249570393f7a37e037abf22cd6012a4cc56a71)
+    FetchContent_Declare(SDL2
+        URL https://codeload.github.com/libsdl-org/SDL/tar.gz/5d249570393f7a37e037abf22cd6012a4cc56a71
+        URL_HASH SHA256=10f1194f8d2e4a73ca1c7c553b3189d0b68ab9ef3544e8d2a268e4429456b373)
     FetchContent_MakeAvailable(SDL2)
     configure_file("${sdl2_SOURCE_DIR}/LICENSE.txt" "${CMAKE_BINARY_DIR}/SDL2-LICENSE.txt" COPYONLY)
     configure_file("${json_SOURCE_DIR}/LICENSE.MIT" "${CMAKE_BINARY_DIR}/JSON-LICENSE.txt" COPYONLY)
