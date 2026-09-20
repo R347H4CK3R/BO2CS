@@ -1,0 +1,35 @@
+name: Rebuild validation reports
+on:
+  push:
+    branches: ['codex/ios-pipeline']
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'Existing iOS Build run containing the validated binaries and runtime reports'
+        required: true
+        default: '35480844867'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  reports:
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[reports-only]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BUILD_RUN_ID: ${{ inputs.build_run_id || '35480844867' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s Tests -v
+      - run: python3 Scripts/check_source.py
+      - name: Reassemble evidence without rebuilding binaries
+        run: python3 Scripts/collect_reports.py --repository '${{ github.repository }}' --run-id "$BUILD_RUN_ID"
+      - run: python3 Scripts/ios.py report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BO2CS-Validation-Reports
+          path: Build/Reports/
+          retention-days: 30

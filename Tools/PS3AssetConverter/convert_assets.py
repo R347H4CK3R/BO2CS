@@ -77,7 +77,7 @@ def normalize_scene(data):
             'collision': 'solid cells', 'navigation': 'four-neighbor walkable grid'}
 
 
-def convert(source, output, intermediate, scan_only=False):
+def convert(source, output, intermediate, scan_only=False, standard_only=False):
     source, output, intermediate = (Path(p).resolve() for p in (source, output, intermediate))
     if not source.is_dir():
         raise ValueError('source directory does not exist')
@@ -114,6 +114,9 @@ def convert(source, output, intermediate, scan_only=False):
                 record['converter_used'] = 'read-only-scanner-v1'
                 continue
             supported = info[0] in ('PNG', 'WAV', 'BO2CS_SCENE') and record['file_size'] <= 32 * 1024**2
+            if not supported and standard_only:
+                record['warnings'].append('Unsupported data preserved at original source path; standard-only mode does not duplicate container bytes.')
+                continue
             target = intermediate / ('normalized' if supported else 'unsupported') / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             # Copy first, so malformed supported files are still preserved.
@@ -154,7 +157,8 @@ if __name__ == '__main__':
     parser.add_argument('--output', required=True)
     parser.add_argument('--intermediate', default='GameDataIntermediate')
     parser.add_argument('--scan-only', action='store_true', help='Read headers and metadata only; do not copy or convert assets')
+    parser.add_argument('--standard-only', action='store_true', help='Convert supported formats; preserve unsupported files at source without duplicating them')
     args = parser.parse_args()
-    result = convert(args.source, args.output, args.intermediate, args.scan_only)
+    result = convert(args.source, args.output, args.intermediate, args.scan_only, args.standard_only)
     print(json.dumps({'assets': len(result['assets']), 'errors': sum(bool(a['errors']) for a in result['assets'])}))
     raise SystemExit(1 if any(a['errors'] for a in result['assets']) else 0)

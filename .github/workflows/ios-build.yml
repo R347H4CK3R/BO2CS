@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ios-${{ github.ref }}
@@ -14,6 +15,7 @@ concurrency:
 
 jobs:
   source-validation:
+    if: ${{ !contains(github.event.head_commit.message, '[reports-only]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -168,15 +170,14 @@ jobs:
 
   final-reports:
     needs: [source-validation, converter-unit-tests, simulator-build, simulator-runtime-test, device-build, ipa-packaging, ipa-validation]
-    if: always()
+    if: ${{ always() && !contains(github.event.head_commit.message, '[reports-only]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: '*Reports'
-          merge-multiple: true
-          path: Build/Reports
+      - name: Collect latest attempt per report group
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 Scripts/collect_reports.py --repository '${{ github.repository }}' --run-id '${{ github.run_id }}'
       - run: python3 Scripts/ios.py report
       - uses: actions/upload-artifact@v4
         with:

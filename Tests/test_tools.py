@@ -47,6 +47,17 @@ class SimulatorTests(unittest.TestCase):
 
 
 class ConverterTests(unittest.TestCase):
+    def test_standard_only_keeps_unknown_in_source(self):
+        m = module('convert', 'Tools/PS3AssetConverter/convert_assets.py')
+        with tempfile.TemporaryDirectory() as d:
+            p=pathlib.Path(d);(p/'src').mkdir();(p/'src/unknown.ff').write_bytes(b'unknown')
+            m.convert(p/'src',p/'out',p/'mid',standard_only=True)
+            entry=json.loads((p/'out/asset_inventory.json').read_text())['assets'][0]
+            self.assertEqual(entry['conversion_status'],'unsupported')
+            self.assertTrue(entry['warnings'])
+            self.assertEqual((p/'src/unknown.ff').read_bytes(),b'unknown')
+            self.assertEqual(list((p/'mid').rglob('*')),[])
+
     def test_scan_only_never_copies_source_data(self):
         m = module('convert', 'Tools/PS3AssetConverter/convert_assets.py')
         with tempfile.TemporaryDirectory() as d:

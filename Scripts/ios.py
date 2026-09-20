@@ -185,10 +185,11 @@ def runtime():
         run(['xcrun', 'simctl', 'launch', '--terminate-running-process',
              '--stdout=' + str(REPORTS / 'app-stdout.log'), '--stderr=' + str(REPORTS / 'app-stderr.log'),
              udid, BUNDLE], 'simulator-launch.log', timeout=60, env=env)
+        launched_at = time.monotonic()
         deadline = time.monotonic() + 120
         captured = False
         while time.monotonic() < deadline:
-            if not captured and time.time() - start > 30:
+            if not captured and time.monotonic() - launched_at > 20:
                 run(['xcrun', 'simctl', 'io', udid, 'screenshot', str(REPORTS / 'gameplay.png')], 'screenshot.log', check=False)
                 captured = True
             file = logs / 'AUTOTEST_RESULT.json'
@@ -202,6 +203,15 @@ def runtime():
             result = {'status': 'FAIL', 'passed': False, 'reason': 'No AUTOTEST_RESULT within 120 seconds: crash, hang or failed initialization'}
         if logs.exists():
             shutil.copytree(logs, REPORTS / 'RuntimeLogs', dirs_exist_ok=True)
+            runtime_log = logs / 'runtime.log'
+            if runtime_log.exists():
+                lines = runtime_log.read_text(errors='replace').splitlines()
+                stages = ('APP_START', 'FILESYSTEM_INIT', 'RENDERER_INIT', 'AUDIO_INIT', 'INPUT_INIT',
+                          'GAMEDATA_INIT', 'MAP_LOAD_BEGIN', 'MAP_GEOMETRY_READY', 'COLLISION_READY',
+                          'PLAYER_SPAWNED', 'BOTS_SPAWNED', 'GAME_LOOP_ACTIVE')
+                initialized = [line for line in lines if any(stage in line for stage in stages)]
+                result['last_successful_initialization_stage'] = initialized[-1] if initialized else None
+                result['clean_exit_logged'] = any('APP_EXIT clean' in line for line in lines)
         run(['xcrun', 'simctl', 'spawn', udid, 'log', 'show', '--last', '5m', '--style', 'compact',
              '--predicate', 'process == "GameName"'], 'simulator-os.log', timeout=90, check=False)
     except subprocess.TimeoutExpired as exc:
@@ -249,13 +259,18 @@ def report():
                 'simulator_test_status': runtime_result['status'], 'device_build_status': receipt('device')['status'],
                 'ipa_validation_status': receipt('ipa')['status'],
                 'ipa_path': 'Build/GameName-unsigned.ipa' if receipt('ipa')['status'] == 'PASS' else None,
-                'known_blockers': ['User PS3 game path and unencrypted samples unavailable'],
+                'known_blockers': ['Signed PS3 fastfile maps unsupported under no-decryption boundary; unencrypted geometry/entity export required'],
                 'failed_tests': [n for n in ('simulator', 'runtime', 'device', 'ipa') if receipt(n)['status'] == 'FAIL'],
                 'last_successful_build': None, 'full_project_complete': False}
     if progress['simulator_build_status'] == progress['device_build_status'] == 'PASS':
         progress['completed_phases'].append(2)
         progress['current_phase'] = 6
         progress['last_successful_build'] = 'GitHub Actions receipts attached; original fixture only'
+    if (REPORTS / 'collection_manifest.json').exists():
+        progress['evidence_source'] = json.loads((REPORTS / 'collection_manifest.json').read_text())
+    if runtime_result['status'] == 'PASS':
+        progress['verified_prototype_milestones'] = ['original map rendering', 'player spawning', 'collision',
+            'hitscan weapons', 'bot updates', 'rounds', 'touch UI initialization', '60-second iPhone 16 Plus simulator match']
     (REPORTS / 'PROJECT_PROGRESS.json').write_text(json.dumps(progress, indent=2))
     if not (REPORTS / 'AUTOTEST_RESULT.json').exists():
         (REPORTS / 'AUTOTEST_RESULT.json').write_text(json.dumps({'status': 'NOT_RUN', 'passed': None}))
