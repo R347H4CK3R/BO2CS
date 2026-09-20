@@ -1,0 +1,9 @@
+{
+  "status": "NOT_RUN",
+  "passed": null,
+  "reason": "No runtime implemented; Apple build host unavailable at phase 2.",
+  "execution_environment": null,
+  "duration_seconds": null,
+  "checks": [],
+  "performance": null
+}

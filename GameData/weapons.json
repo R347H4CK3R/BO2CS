@@ -1,0 +1,17 @@
+{
+  "identifier": "carbine",
+  "model": "original_procedural_carbine",
+  "first_person_model": "original_procedural_carbine",
+  "fire_mode": "automatic",
+  "damage": 24,
+  "fire_rate": 6,
+  "magazine_capacity": 24,
+  "reserve_ammo": 144,
+  "reload_duration": 1.7,
+  "recoil": 0.012,
+  "spread": 0.035,
+  "movement_accuracy": 0.07,
+  "type": "hitscan",
+  "audio": "procedural_tone",
+  "animations": {"fire": "procedural", "reload": "procedural"}
+}

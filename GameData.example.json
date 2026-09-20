@@ -1,0 +1,7 @@
+{
+  "source": "./PS3_GAME",
+  "intermediate": "./GameDataIntermediate",
+  "output": "./GeneratedGameData",
+  "preserve_originals": true,
+  "note": "Proposed configuration only; converter is not implemented. Source must be user-provided and unencrypted."
+}

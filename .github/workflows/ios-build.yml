@@ -1,0 +1,185 @@
+name: iOS Build
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 Scripts/check_source.py
+      - run: bash -n Scripts/build_ios.sh Tools/validate_ipa.sh
+
+  converter-unit-tests:
+    needs: source-validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Converter and build-tool unit tests
+        run: python3 -m unittest discover -s Tests -v
+      - uses: actions/cache@v4
+        with:
+          path: Build/Host/_deps
+          key: host-dependencies-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+      - run: cmake -S . -B Build/Host -DBO2CS_IOS=OFF -DBUILD_TESTING=ON
+      - run: cmake --build Build/Host --parallel 3
+      - run: ctest --test-dir Build/Host --output-on-failure --output-junit unit-tests.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: UnitTestResults
+          path: Build/Host/unit-tests.xml
+
+  simulator-build:
+    needs: source-validation
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: Build/Dependencies/simulator
+          key: ios-simulator-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt') }}
+      - name: Resolve dependencies and build simulator
+        run: bash Scripts/build_ios.sh simulator
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SimulatorBuild
+          path: Build/SimulatorBuild.zip
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SimulatorBuildReports
+          path: Build/Reports/
+
+  simulator-runtime-test:
+    needs: [simulator-build, converter-unit-tests]
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: SimulatorBuild
+          path: Build
+      - name: Boot, install, launch AUTOTEST, collect evidence and shut down
+        run: bash Scripts/build_ios.sh runtime
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: SimulatorRuntimeReports
+          path: Build/Reports/
+
+  device-build:
+    needs: [source-validation, converter-unit-tests]
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: Build/Dependencies/device
+          key: ios-device-deps-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('CMakeLists.txt') }}
+      - name: Build generic ARM64 device target without signing
+        run: bash Scripts/build_ios.sh device
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DeviceBuild
+          path: Build/DeviceBuild.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DeviceBuildReports
+          path: Build/Reports/
+
+  ipa-packaging:
+    needs: [device-build, simulator-runtime-test]
+    # The user's CI exception allows compile/package inspection if simulator boot is unavailable.
+    # An actual runtime failure still blocks packaging.
+    if: ${{ always() && needs.device-build.result == 'success' && needs.simulator-runtime-test.result == 'success' }}
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: DeviceBuild
+          path: Build
+      - run: bash Scripts/build_ios.sh package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UnsignedIPA-Unvalidated
+          path: Build/GameName-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: PackageReports
+          path: Build/Reports/
+
+  ipa-validation:
+    needs: ipa-packaging
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: UnsignedIPA-Unvalidated
+          path: Build
+      - run: bash Tools/validate_ipa.sh Build/GameName-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GameName-unsigned-IPA
+          path: Build/GameName-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: IPAValidationReports
+          path: Build/Reports/
+
+  final-reports:
+    needs: [source-validation, converter-unit-tests, simulator-build, simulator-runtime-test, device-build, ipa-packaging, ipa-validation]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*Reports'
+          merge-multiple: true
+          path: Build/Reports
+      - run: python3 Scripts/ios.py report
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BO2CS-Validation-Reports
+          path: Build/Reports/
+          retention-days: 30

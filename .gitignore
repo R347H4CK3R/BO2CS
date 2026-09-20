@@ -1,0 +1,10 @@
+GeneratedGameData/
+GameDataIntermediate/
+LocalGameData/
+PS3_GAME/
+Build/
+Build/ProprietaryAssets/
+LocalConfig.json
+.DS_Store
+__pycache__/
+*.pyc
