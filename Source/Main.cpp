@@ -198,7 +198,10 @@ int main(int argc,char** argv){
             if(autotest&&elapsed>=61){
                 bool pass=worldReady&&playerSpawned&&frames>=60&&game.actors.size()==6&&game.botUpdates>100&&game.shots>0&&game.hits>0&&game.movements>0&&game.collisionBlocks>0;
                 json result={{"status",pass?"PASS":"FAIL"},{"passed",pass},{"duration_seconds",elapsed-1},{"frames",frames},{"player_spawned",playerSpawned},{"world_ready",worldReady},{"bot_updates",game.botUpdates},{"shots",game.shots},{"hits",game.hits},{"movements",game.movements},{"collision_blocks",game.collisionBlocks},{"round",game.round},{"plants",game.plants},{"defuses",game.defuses},{"entity_count",game.actors.size()},{"average_frame_ms",total*1000/frames},{"worst_frame_ms",worst*1000},{"memory_mb",residentMemoryMB()},{"loaded_textures",0},{"loaded_meshes",0},{"loaded_grid_maps",1},{"map_load_ms",loadMilliseconds},{"asset_load_ms",loadMilliseconds},{"draw_calls_last_frame",drawCalls},{"performance_scope","simulator only"},{"exit_reason","clean SDL shutdown requested"},{"asset_kind","original synthetic fixture, not PS3"}};
-                std::ofstream(logs+"/AUTOTEST_RESULT.json")<<result.dump(2);log(pass?"AUTOTEST_PASS":"AUTOTEST_FAIL");running=false;
+                result["run_id"]=SDL_getenv("AUTOTEST_RUN_ID")?SDL_getenv("AUTOTEST_RUN_ID"):"local";
+                std::ofstream(logs+"/AUTOTEST_RESULT.tmp")<<result.dump(2);
+                std::rename((logs+"/AUTOTEST_RESULT.tmp").c_str(),(logs+"/AUTOTEST_RESULT.json").c_str());
+                log(pass?"AUTOTEST_PASS":"AUTOTEST_FAIL");running=false;
             }
             SDL_Delay(1);
         }

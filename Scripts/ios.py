@@ -12,6 +12,7 @@ import sys
 import time
 import traceback
 import zipfile
+import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / 'Build'
@@ -57,6 +58,20 @@ def run(command, log=None, timeout=1200, check=True, env=None):
 def write_receipt(name, status, **details):
     REPORTS.mkdir(parents=True, exist_ok=True)
     (REPORTS / (name + '.json')).write_text(json.dumps(dict(status=status, **details), indent=2))
+
+
+def valid_result(result, run_id):
+    return result.get('run_id') == run_id and (result.get('status') != 'PASS' or
+        (result.get('duration_seconds', 0) >= 60 and result.get('frames', 0) >= 60))
+
+
+def cleanup_command(command, logfile, errors, timeout=60):
+    try:
+        p = run(command, logfile, check=False, timeout=timeout)
+        if p.returncode:
+            errors.append(f'{command[0]} cleanup returned {p.returncode}: {logfile}')
+    except Exception as exc:
+        errors.append(str(exc))
 
 
 def environment():
@@ -144,6 +159,8 @@ def runtime():
     environment()
     device = None
     booted = False
+    run_id = str(uuid.uuid4())
+    cleanup_errors = []
     result = {'status': 'FAIL', 'passed': False, 'reason': 'runtime did not finish'}
     app = unpack(BUILD / 'SimulatorBuild.zip', BUILD / 'SimulatorRun')
     start = time.time()
@@ -161,12 +178,13 @@ def runtime():
         booted = True
         run(['xcrun', 'simctl', 'install', udid, str(app)], 'simulator-install.log', timeout=120)
         # Explicit UUID avoids accidental launch into a different booted device.
-        env = dict(os.environ, SIMCTL_CHILD_AUTOTEST='1')
+        container = Path(run(['xcrun', 'simctl', 'get_app_container', udid, BUNDLE, 'data']).stdout.strip())
+        logs = container / 'Documents/Logs'
+        (logs / 'AUTOTEST_RESULT.json').unlink(missing_ok=True)
+        env = dict(os.environ, SIMCTL_CHILD_AUTOTEST='1', SIMCTL_CHILD_AUTOTEST_RUN_ID=run_id)
         run(['xcrun', 'simctl', 'launch', '--terminate-running-process',
              '--stdout=' + str(REPORTS / 'app-stdout.log'), '--stderr=' + str(REPORTS / 'app-stderr.log'),
              udid, BUNDLE], 'simulator-launch.log', timeout=60, env=env)
-        container = Path(run(['xcrun', 'simctl', 'get_app_container', udid, BUNDLE, 'data']).stdout.strip())
-        logs = container / 'Documents/Logs'
         deadline = time.monotonic() + 120
         captured = False
         while time.monotonic() < deadline:
@@ -176,8 +194,8 @@ def runtime():
             file = logs / 'AUTOTEST_RESULT.json'
             if file.exists():
                 result = json.loads(file.read_text())
-                if result.get('status') == 'PASS' and (result.get('duration_seconds', 0) < 60 or result.get('frames', 0) < 60):
-                    result = {'status': 'FAIL', 'passed': False, 'reason': 'Autotest evidence below minimum duration/frame count'}
+                if not valid_result(result, run_id):
+                    result = {'status': 'FAIL', 'passed': False, 'reason': 'Stale or incomplete autotest evidence'}
                 break
             time.sleep(2)
         else:
@@ -193,13 +211,14 @@ def runtime():
         result = {'status': 'FAIL', 'passed': False, 'reason': str(exc)}
     finally:
         if device:
-            run(['xcrun', 'simctl', 'terminate', device['udid'], BUNDLE], 'simulator-terminate.log', check=False, timeout=30)
-            run(['xcrun', 'simctl', 'shutdown', device['udid']], 'simulator-shutdown.log', check=False, timeout=60)
+            cleanup_command(['xcrun', 'simctl', 'terminate', device['udid'], BUNDLE], 'simulator-terminate.log', cleanup_errors, timeout=30)
+            cleanup_command(['xcrun', 'simctl', 'shutdown', device['udid']], 'simulator-shutdown.log', cleanup_errors)
         crashdir = Path.home() / 'Library/Logs/DiagnosticReports'
         for crash in crashdir.glob('GameName*'):
             if crash.is_file() and crash.stat().st_mtime >= start:
                 shutil.copyfile(crash, REPORTS / crash.name)
         result.update(simulator=device, performance_scope='simulator only, not device performance',
+                      invocation_id=run_id, cleanup_diagnostics=cleanup_errors,
                       device_ipa_executed=False, exit_reason=result.get('exit_reason', 'not observable; see runtime/OS logs'))
         (REPORTS / 'AUTOTEST_RESULT.json').write_text(json.dumps(result, indent=2))
         write_receipt('runtime', result['status'], **{k: v for k, v in result.items() if k != 'status'})

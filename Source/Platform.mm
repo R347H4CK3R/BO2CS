@@ -13,6 +13,8 @@ static UIWindow* gameWindow(){
     for(UIScene* scene in [UIApplication sharedApplication].connectedScenes)
         if([scene isKindOfClass:[UIWindowScene class]])
             for(UIWindow* window in ((UIWindowScene*)scene).windows)if(window.isKeyWindow)return window;
+    id<UIApplicationDelegate> delegate=[UIApplication sharedApplication].delegate;
+    if([delegate respondsToSelector:@selector(window)])return delegate.window;
     return nil;
 }
 void safeInsets(float& l,float& r,float& t,float& b){

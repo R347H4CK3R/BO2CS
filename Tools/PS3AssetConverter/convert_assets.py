@@ -7,9 +7,20 @@ import math
 from pathlib import Path
 import shutil
 import wave
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from containers import ipak_metadata
 
 
 def identify(header, name):
+    if header.startswith(b'TAff0100'):
+        return 'T6_FASTFILE_SIGNED', 'map_or_asset_container', 'uninspected', 'big'
+    if header.startswith(b'TAffu100'):
+        return 'T6_FASTFILE_UNSIGNED', 'map_or_asset_container', 'uninspected', 'unknown'
+    if header[:4] in (b'IPAK', b'KAPI'):
+        return 'T6_IPAK', 'texture_container', 'block-specific', 'big' if header[:4] == b'IPAK' else 'little'
+    if header.startswith(b'2UX#'):
+        return 'T6_SOUND_BANK', 'audio_container', 'codec-dependent', 'little'
     signatures = [(b'\x89PNG\r\n\x1a\n', 'PNG', 'texture', 'deflate', 'big'),
                   (b'DDS ', 'DDS', 'texture', 'format-dependent', 'little'),
                   (b'OggS', 'OGG', 'audio', 'codec-dependent', 'little'),
@@ -66,7 +77,7 @@ def normalize_scene(data):
             'collision': 'solid cells', 'navigation': 'four-neighbor walkable grid'}
 
 
-def convert(source, output, intermediate):
+def convert(source, output, intermediate, scan_only=False):
     source, output, intermediate = (Path(p).resolve() for p in (source, output, intermediate))
     if not source.is_dir():
         raise ValueError('source directory does not exist')
@@ -94,6 +105,14 @@ def convert(source, output, intermediate):
             info = identify(header, path.name)
             for k, v in zip(('detected_format', 'probable_asset_class', 'compression', 'endianness'), info):
                 record[k] = v
+            if info[0] == 'T6_IPAK':
+                record['container_metadata'] = ipak_metadata(path)
+            if info[0] == 'T6_FASTFILE_SIGNED':
+                record['warnings'].append('Authenticated fastfile: metadata only. No authentication bypass or decryption is implemented.')
+            if scan_only:
+                record['conversion_status'] = 'inventoried'
+                record['converter_used'] = 'read-only-scanner-v1'
+                continue
             supported = info[0] in ('PNG', 'WAV', 'BO2CS_SCENE') and record['file_size'] <= 32 * 1024**2
             target = intermediate / ('normalized' if supported else 'unsupported') / rel
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -134,7 +153,8 @@ if __name__ == '__main__':
     parser.add_argument('--source', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--intermediate', default='GameDataIntermediate')
+    parser.add_argument('--scan-only', action='store_true', help='Read headers and metadata only; do not copy or convert assets')
     args = parser.parse_args()
-    result = convert(args.source, args.output, args.intermediate)
+    result = convert(args.source, args.output, args.intermediate, args.scan_only)
     print(json.dumps({'assets': len(result['assets']), 'errors': sum(bool(a['errors']) for a in result['assets'])}))
     raise SystemExit(1 if any(a['errors'] for a in result['assets']) else 0)

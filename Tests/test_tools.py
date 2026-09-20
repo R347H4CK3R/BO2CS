@@ -17,6 +17,17 @@ def module(name, path):
 
 
 class SimulatorTests(unittest.TestCase):
+    def test_stale_runtime_pass_rejected(self):
+        m = module('ios', 'Scripts/ios.py')
+        self.assertFalse(m.valid_result({'run_id':'old','status':'PASS','duration_seconds':61,'frames':4000}, 'new'))
+        self.assertTrue(m.valid_result({'run_id':'new','status':'PASS','duration_seconds':61,'frames':4000}, 'new'))
+
+    def test_cleanup_timeout_is_recorded_without_raising(self):
+        m = module('ios', 'Scripts/ios.py')
+        errors = []
+        m.cleanup_command([__import__('sys').executable, '-c', 'import time; time.sleep(5)'], 'cleanup-test.log', errors, timeout=.05)
+        self.assertEqual(len(errors), 1)
+
     def test_prefers_exact_phone_even_over_newer_pro_max(self):
         m = module('ios', 'Scripts/ios.py')
         data = {'devices': {'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
@@ -36,6 +47,24 @@ class SimulatorTests(unittest.TestCase):
 
 
 class ConverterTests(unittest.TestCase):
+    def test_scan_only_never_copies_source_data(self):
+        m = module('convert', 'Tools/PS3AssetConverter/convert_assets.py')
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d); (p/'src').mkdir(); (p/'src/a.ff').write_bytes(b'TAff0100'+b'\0'*56)
+            m.convert(p/'src', p/'out', p/'mid', scan_only=True)
+            data = json.loads((p/'out/asset_inventory.json').read_text())
+            self.assertEqual(data['assets'][0]['detected_format'], 'T6_FASTFILE_SIGNED')
+            self.assertEqual(list((p/'mid').rglob('*')), [])
+
+    def test_ipak_big_endian_sections_bounds_checked(self):
+        m = module('containers', 'Tools/PS3AssetConverter/containers.py')
+        good = struct.pack('>8I',0x4950414b,0x50000,64,1,2,32,32,1)+b'\0'*32
+        with tempfile.TemporaryDirectory() as d:
+            p=pathlib.Path(d)/'test.ipak';p.write_bytes(good)
+            self.assertEqual(m.ipak_metadata(p)['endianness'], 'big')
+            p.write_bytes(good[:40])
+            with self.assertRaises(ValueError):m.ipak_metadata(p)
+
     def test_unknown_bytes_preserved_and_source_unchanged(self):
         m = module('convert', 'Tools/PS3AssetConverter/convert_assets.py')
         with tempfile.TemporaryDirectory() as d:
