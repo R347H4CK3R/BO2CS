@@ -1,0 +1,76 @@
+name: Publish reviewed BO2CS Tactical prototype
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-reviewed-prototype.yml']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: publish-reviewed-bo2cs
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: R347H4CK3R/BO2CS
+      TAG: prototype-0.1.0-build1
+      SOURCE_SHA: 0a00baf09cf89697e3c5341a76800c5dbcb7cd3f
+      IPA_SHA: 2a1a19d9692be8e163c0a2b3a38f3c96c41e2e10251b30ef53e14e76b3836838
+    steps:
+      - name: Require successful exact source build
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/35542001636" > run.json
+          python3 - <<'PY'
+          import json,os
+          r=json.load(open('run.json'))
+          assert r['conclusion']=='success' and r['head_sha']==os.environ['SOURCE_SHA']
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          repository: R347H4CK3R/BO2CS
+          run-id: 35542001636
+          artifact-ids: '10614504342'
+          github-token: ${{ github.token }}
+          path: candidate
+      - name: Verify unchanged reviewed IPA
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,plistlib,zipfile
+          files=list(pathlib.Path('candidate').rglob('*.ipa'));assert len(files)==1
+          p=files[0];assert p.stat().st_size==522884
+          assert hashlib.sha256(p.read_bytes()).hexdigest()==os.environ['IPA_SHA']
+          with zipfile.ZipFile(p) as z:
+            i=plistlib.loads(z.read('Payload/GameName.app/Info.plist'))
+            assert (i['CFBundleIdentifier'],str(i['CFBundleShortVersionString']),str(i['CFBundleVersion']))==('io.github.r347h4ck3r.bo2cs','0.1.0','1')
+          p.rename('GameName-unsigned.ipa')
+          pathlib.Path('SHA256SUMS').write_text(os.environ['IPA_SHA']+'  GameName-unsigned.ipa\n')
+          PY
+      - name: Publish exact prototype without replacing existing release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo 'Release already exists; refusing to overwrite it.'
+            exit 1
+          fi
+          curl --fail --location https://raw.githubusercontent.com/R347H4CK3R/BO2CS/0a00baf09cf89697e3c5341a76800c5dbcb7cd3f/LICENSE -o LICENSE
+          test -s LICENSE
+          cat > release-notes.md <<'NOTES'
+          BO2CS Tactical Prototype 0.1.0 (1), iOS 16 or later. Original MIT-licensed tactical FPS prototype using SDL2, not a Call of Duty game and not a complete commercial-game port. Uses original validation fixtures; no proprietary game data is required.
+
+          Exact source: https://github.com/R347H4CK3R/BO2CS/tree/0a00baf09cf89697e3c5341a76800c5dbcb7cd3f . The source pins SDL and JSON dependencies; their notices are bundled in the IPA. Project MIT license accompanies this release.
+
+          Build https://github.com/R347H4CK3R/BO2CS/actions/runs/35542001636 passed native compilation, IPA validation and simulator gameplay autotest. The actual simulator receipt reports PASS and passed=true. The device IPA was not executed, and physical-device gameplay/SideStore installation are untested. Unsigned IPA requires compatible signing. Keep existing saves backed up.
+
+          The IPA is unchanged from reviewed artifact 10614504342,522884 bytes. SHA256: 2a1a19d9692be8e163c0a2b3a38f3c96c41e2e10251b30ef53e14e76b3836838.
+          NOTES
+          gh release create "$TAG" --target "$SOURCE_SHA" --title 'BO2CS Tactical 0.1.0 (1) - experimental prototype' --notes-file release-notes.md --draft GameName-unsigned.ipa SHA256SUMS LICENSE
+          gh release view "$TAG" --json assets > release.json
+          python3 - <<'PY'
+          import json
+          a=[x for x in json.load(open('release.json'))['assets'] if x['name']=='GameName-unsigned.ipa']
+          assert len(a)==1 and a[0]['size']==522884
+          PY
+          gh release edit "$TAG" --draft=false --latest=false
